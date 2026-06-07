@@ -1,69 +1,66 @@
 # WiFi Manager
 
-A lightweight **Windows Wi-Fi manager GUI** built with **Python + CustomTkinter**, backed by the native `netsh wlan` command set.
+A focused Windows Wi-Fi desktop app built with Python, CustomTkinter, and the
+native `netsh wlan` command set.
 
-It’s split into:
-- `wifi_backend.py` — a small backend wrapper around `netsh` (scan, connect, disconnect, saved profiles, password extraction)
-- `main.py` — a CustomTkinter desktop UI that calls the backend in background threads to keep the interface responsive
+## Highlights
 
----
-
-## Features
-
-### GUI (CustomTkinter)
-- **Scan & list nearby networks** with:
-  - SSID
-  - Signal strength (%)
-  - Authentication/security label
-- **Show current connection** in the sidebar
-- **Connect / Disconnect** with one click
-- **Saved profile helpers**
-  - Marks networks as **(Saved)**
-  - A **Key** button appears for saved profiles to display the saved Wi-Fi password (when available)
-
-### Backend (netsh-based)
-- Scan networks using:
-  - `netsh wlan show networks mode=bssid`
-  - Parses SSID / Signal / Authentication
-  - Deduplicates by SSID (keeps strongest signal)
-- Current SSID detection:
-  - `netsh wlan show interfaces`
-- Connect flows:
-  - Connect to an **existing saved profile**:
-    - `netsh wlan connect name="SSID"`
-  - Connect to a **new WPA2-Personal network** (basic v1 approach):
-    - Generates a WLAN profile XML (`WPA2PSK` + `AES`)
-    - `netsh wlan add profile filename="temp_profile_<SSID>.xml"`
-    - `netsh wlan connect name="SSID"`
-    - Cleans up the temporary XML file afterwards
-- Saved profiles:
-  - `netsh wlan show profiles`
-- Saved password extraction (cleartext):
-  - `netsh wlan show profile name="SSID" key=clear`
-  - Parses `Key Content`
-
----
-
-## Platform Support
-
-✅ **Windows 10/11** (intended)  
-⚠️ Not currently implemented for Linux/macOS (would require `nmcli`, `networksetup`, etc.)
-
----
+- Scans nearby networks without freezing the interface
+- Sorts networks by strongest signal and shows available bands
+- Searches networks and filters by saved or open networks
+- Connects directly to saved profiles without asking for the password again
+- Supports new open, WPA-Personal, WPA2-Personal, and WPA3-Personal profiles
+- Shows clear progress and actionable Windows command errors
+- Uses argument-based command execution instead of shell command strings
+- Generates escaped profile XML in a securely named temporary file
+- Supports light, dark, and system appearance modes
 
 ## Requirements
 
-- **Python 3.x**
-- **Windows** with Wi-Fi and `netsh` available
-- `customtkinter` (UI)
+- Windows 10 or Windows 11
+- Python 3.10 or newer
+- A Wi-Fi adapter managed by Windows WLAN AutoConfig
 
-> `tkinter` ships with standard Python on Windows in most installs, but some minimal Python distributions may omit it.
+## Install and run
 
----
-
-## Install
-
-### 1) Clone the repo
-```bash
+```powershell
 git clone https://github.com/kai9987kai/Wifi-Manager.git
 cd Wifi-Manager
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python main.py
+```
+
+Press `F5` to refresh networks or `Ctrl+F` to focus search.
+
+## Security notes
+
+WiFi Manager can ask Windows to reveal the key stored in a saved Wi-Fi
+profile. The app requires confirmation before displaying it. Windows may
+require administrator access and may decline to return the key.
+
+New personal-network passwords are written only to a temporary WLAN profile
+file, imported for the current Windows user, and then deleted. Windows stores
+the resulting profile using its normal profile protection.
+
+Enterprise networks that require certificates, usernames, or organization
+policy must be configured through Windows before WiFi Manager can connect to
+their saved profile.
+
+## Development
+
+Run the backend test suite with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The project is split into:
+
+- `wifi_backend.py`: safe `netsh` execution, parsing, profiles, and connection checks
+- `main.py`: CustomTkinter interface and background task coordination
+- `tests/`: backend regression tests
+
+`netsh` output labels are localized by Windows. The parser currently targets
+English Windows installations.
