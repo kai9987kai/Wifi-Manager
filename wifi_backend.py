@@ -72,6 +72,8 @@ class WiFiBackend:
                     "auth": "Unknown",
                     "encryption": "Unknown",
                     "bands": [],
+                    "channels": [],
+                    "access_points": 0,
                 }
                 continue
 
@@ -80,7 +82,9 @@ class WiFiBackend:
 
             value = self._line_value(line)
             label = line.split(":", 1)[0].strip().lower()
-            if label == "signal" and value:
+            if re.match(r"^bssid\s+\d+$", label):
+                current["access_points"] += 1
+            elif label == "signal" and value:
                 try:
                     signal = int(value.replace("%", "").strip())
                     current["signal"] = max(current["signal"], signal)
@@ -92,6 +96,8 @@ class WiFiBackend:
                 current["encryption"] = value
             elif label == "band" and value and value not in current["bands"]:
                 current["bands"].append(value)
+            elif label == "channel" and value and value not in current["channels"]:
+                current["channels"].append(value)
 
         if current and current["ssid"]:
             networks.append(current)
@@ -99,8 +105,16 @@ class WiFiBackend:
         unique_networks = {}
         for network in networks:
             existing = unique_networks.get(network["ssid"])
-            if existing is None or network["signal"] > existing["signal"]:
+            if existing is None:
                 unique_networks[network["ssid"]] = network
+                continue
+
+            existing["signal"] = max(existing["signal"], network["signal"])
+            existing["access_points"] += network["access_points"]
+            for field in ("bands", "channels"):
+                for value in network[field]:
+                    if value not in existing[field]:
+                        existing[field].append(value)
 
         return sorted(
             unique_networks.values(),
@@ -109,8 +123,14 @@ class WiFiBackend:
 
     def get_current_connection(self) -> str | None:
         """Return the SSID connected on any Wi-Fi interface."""
+        connection = self.get_connection_info()
+        return connection["ssid"] if connection else None
+
+    def get_connection_info(self) -> dict | None:
+        """Return telemetry for the first connected Wi-Fi interface."""
         output = self._run_command("show", "interfaces")
-        interface = None
+        interfaces = []
+        current = None
 
         for raw_line in output.splitlines():
             line = raw_line.strip()
@@ -118,19 +138,50 @@ class WiFiBackend:
             normalized_label = label.lower()
 
             if normalized_label == "name":
-                interface = {"state": "", "ssid": None}
-            elif interface is not None and normalized_label == "state":
-                interface["state"] = value.lower()
-            elif interface is not None and normalized_label == "ssid":
-                interface["ssid"] = value
+                if current:
+                    interfaces.append(current)
+                current = {
+                    "interface": value,
+                    "state": "",
+                    "ssid": None,
+                    "signal": None,
+                    "band": None,
+                    "channel": None,
+                    "radio_type": None,
+                    "receive_rate": None,
+                    "transmit_rate": None,
+                    "authentication": None,
+                    "profile": None,
+                }
+                continue
 
-            if (
-                interface
-                and interface["state"] == "connected"
-                and interface["ssid"]
-            ):
-                return interface["ssid"]
+            if current is None:
+                continue
 
+            field_map = {
+                "state": "state",
+                "ssid": "ssid",
+                "band": "band",
+                "channel": "channel",
+                "radio type": "radio_type",
+                "authentication": "authentication",
+                "profile": "profile",
+            }
+            if normalized_label in field_map:
+                current[field_map[normalized_label]] = value
+            elif normalized_label == "signal":
+                current["signal"] = self._parse_percentage(value)
+            elif normalized_label == "receive rate (mbps)":
+                current["receive_rate"] = self._parse_float(value)
+            elif normalized_label == "transmit rate (mbps)":
+                current["transmit_rate"] = self._parse_float(value)
+
+        if current:
+            interfaces.append(current)
+
+        for interface in interfaces:
+            if interface["state"].lower() == "connected" and interface["ssid"]:
+                return interface
         return None
 
     def connect_to_profile(self, ssid: str) -> str:
@@ -190,6 +241,11 @@ class WiFiBackend:
         output = self._run_command("show", "profile", f"name={ssid}", "key=clear")
         match = re.search(r"^\s*Key Content\s*:\s*(.*)$", output, re.MULTILINE | re.IGNORECASE)
         return match.group(1).strip() if match else None
+
+    def delete_profile(self, ssid: str) -> str:
+        """Remove a saved Wi-Fi profile from Windows."""
+        self._validate_ssid(ssid)
+        return self._run_command("delete", "profile", f"name={ssid}")
 
     def disconnect(self) -> str:
         return self._run_command("disconnect")
@@ -293,3 +349,17 @@ class WiFiBackend:
             return line, ""
         label, value = line.split(":", 1)
         return label.strip(), value.strip()
+
+    @staticmethod
+    def _parse_percentage(value: str) -> int | None:
+        try:
+            return int(value.replace("%", "").strip())
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_float(value: str) -> float | None:
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None

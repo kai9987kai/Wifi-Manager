@@ -63,6 +63,7 @@ class WiFiBackendTests(unittest.TestCase):
         self.assertEqual(["Coffee & Code", "Guest"], [item["ssid"] for item in networks])
         self.assertEqual(88, networks[0]["signal"])
         self.assertEqual(["2.4 GHz", "5 GHz"], networks[0]["bands"])
+        self.assertEqual(2, networks[0]["access_points"])
         self.assertEqual("CCMP", networks[0]["encryption"])
 
     def test_current_connection_ignores_disconnected_interface(self):
@@ -80,6 +81,31 @@ class WiFiBackendTests(unittest.TestCase):
             "Office Network",
             OutputBackend(output).get_current_connection(),
         )
+
+    def test_connection_info_parses_live_telemetry(self):
+        output = """
+            Name                   : WiFi
+            State                  : connected
+            SSID                   : Office Network
+            Band                   : 5 GHz
+            Channel                : 48
+            Radio type             : 802.11ac
+            Authentication         : WPA2-Personal
+            Receive rate (Mbps)    : 866.7
+            Transmit rate (Mbps)   : 780
+            Signal                 : 91%
+            Profile                : Office Network
+        """
+
+        info = OutputBackend(output).get_connection_info()
+
+        self.assertEqual("Office Network", info["ssid"])
+        self.assertEqual(91, info["signal"])
+        self.assertEqual("5 GHz", info["band"])
+        self.assertEqual("48", info["channel"])
+        self.assertEqual("802.11ac", info["radio_type"])
+        self.assertEqual(866.7, info["receive_rate"])
+        self.assertEqual(780.0, info["transmit_rate"])
 
     def test_run_command_does_not_use_a_shell(self):
         captured = {}
@@ -145,6 +171,16 @@ class WiFiBackendTests(unittest.TestCase):
 
         with self.assertRaisesRegex(WiFiBackendError, "Access is denied"):
             WiFiBackend(runner=runner).disconnect()
+
+    def test_delete_profile_uses_argument_based_command(self):
+        backend = OutputBackend("Profile deleted.")
+
+        backend.delete_profile('Cafe & "Friends"')
+
+        self.assertEqual(
+            ("delete", "profile", 'name=Cafe & "Friends"'),
+            backend.calls[0],
+        )
 
 
 if __name__ == "__main__":
